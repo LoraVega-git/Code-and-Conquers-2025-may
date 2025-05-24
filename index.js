@@ -18,8 +18,7 @@ controls.enableDamping = true;
 
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
-let hoveredCountry = null;
-let hoverTimeout = null;
+let selectedCountry = null;
 
 const geometry = new THREE.SphereGeometry(2);
 const lineMat = new THREE.LineBasicMaterial({ 
@@ -49,6 +48,9 @@ fetch('./geojson/ne_110m_land.json')
       },
     });
     scene.add(countries);
+    countries.children.forEach((child) => {
+      child.userData = { properties: child.geometry.properties }; // Attach properties to userData
+    });
     countryMeshes.push(...countries.children); // Add country meshes for interaction
   });
 
@@ -67,6 +69,10 @@ fetch('./geojson/countries_states.geojson')
       line: true, // Render as lines
     });
     scene.add(borders);
+    borders.children.forEach((child) => {
+      child.userData = { properties: child.geometry.properties }; // Attach properties to userData
+    });
+    countryMeshes.push(...borders.children); // Add border meshes for interaction
   });
 
 function animate() {
@@ -84,8 +90,8 @@ function handleWindowResize () {
 }
 window.addEventListener('resize', handleWindowResize, false);
 
-// Mouse move event
-window.addEventListener('mousemove', (event) => {
+// Mouse click event
+window.addEventListener('click', (event) => {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
@@ -95,37 +101,29 @@ window.addEventListener('mousemove', (event) => {
   if (intersects.length > 0) {
     const country = intersects[0].object;
 
-    if (hoveredCountry !== country) {
-      hoveredCountry = country;
+    if (selectedCountry !== country) {
+      selectedCountry = country;
 
-      // Clear any existing timeout
-      clearTimeout(hoverTimeout);
-
-      // Set a timeout to zoom in after 5 seconds
-      hoverTimeout = setTimeout(() => {
-        zoomToCountry(country);
-        showCountryInfo(country);
-      }, 5000);
+      // Center the clicked country on the screen
+      centerCountryOnScreen(country);
+      showCountryInfo(country);
     }
-  } else {
-    hoveredCountry = null;
-    clearTimeout(hoverTimeout);
   }
 });
 
-// Zoom to country
-function zoomToCountry(country) {
+// Center the clicked country on the screen
+function centerCountryOnScreen(country) {
   const targetPosition = new THREE.Vector3();
   country.getWorldPosition(targetPosition);
 
-  // Smoothly move the camera to the country's position
+  // Smoothly move the camera to center the country
   const duration = 1.5; // seconds
   const start = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
-  const end = { x: targetPosition.x, y: targetPosition.y, z: targetPosition.z + 2 };
+  const end = { x: targetPosition.x * 1.5, y: targetPosition.y * 1.5, z: targetPosition.z * 1.5 };
 
   let startTime = null;
 
-  function animateZoom(time) {
+  function animateCentering(time) {
     if (!startTime) startTime = time;
     const elapsed = (time - startTime) / 1000;
 
@@ -133,22 +131,37 @@ function zoomToCountry(country) {
       camera.position.x = THREE.MathUtils.lerp(start.x, end.x, elapsed / duration);
       camera.position.y = THREE.MathUtils.lerp(start.y, end.y, elapsed / duration);
       camera.position.z = THREE.MathUtils.lerp(start.z, end.z, elapsed / duration);
-      requestAnimationFrame(animateZoom);
+      controls.target.set(
+        THREE.MathUtils.lerp(controls.target.x, targetPosition.x, elapsed / duration),
+        THREE.MathUtils.lerp(controls.target.y, targetPosition.y, elapsed / duration),
+        THREE.MathUtils.lerp(controls.target.z, targetPosition.z, elapsed / duration)
+      );
+      controls.update();
+      requestAnimationFrame(animateCentering);
     } else {
       camera.position.set(end.x, end.y, end.z);
+      controls.target.copy(targetPosition);
+      controls.update();
     }
   }
 
-  requestAnimationFrame(animateZoom);
+  requestAnimationFrame(animateCentering);
 }
 
 // Show country info in a sidebar
 function showCountryInfo(country) {
   const sidebar = document.getElementById('sidebar');
   sidebar.style.display = 'block';
+
+  // Extract country properties (e.g., name, type, etc.)
+  const properties = country.userData.properties || {};
+  const name = properties.name || 'Unknown';
+  const type = properties.type || 'Unknown';
+
   sidebar.innerHTML = `
     <h2>Country Info</h2>
-    <p>Name: ${country.name || 'Unknown'}</p>
+    <p><strong>Name:</strong> ${name}</p>
+    <p><strong>Type:</strong> ${type}</p>
     <p>Additional info can go here...</p>
   `;
 }
